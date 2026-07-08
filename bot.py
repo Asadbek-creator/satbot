@@ -243,23 +243,38 @@ async def process_m2(message: Message, state: FSMContext):
     def fmt_wrong(lst):
         return ", ".join(str(x) for x in lst) if lst else "yo'q 🎉"
 
+    def checklist(n_questions, wrong_set, skipped_set):
+        """Har bir savol uchun ✅/❌ (yoki kalit yo'q bo'lsa ⬜) ro'yxati."""
+        lines = []
+        row = []
+        for i in range(1, n_questions + 1):
+            if i in skipped_set:
+                mark = f"{i}⬜"
+            elif i in wrong_set:
+                mark = f"{i}❌"
+            else:
+                mark = f"{i}✅"
+            row.append(mark)
+            if len(row) == 6:
+                lines.append(" ".join(row))
+                row = []
+        if row:
+            lines.append(" ".join(row))
+        return "\n".join(lines)
+
     skip_note = ""
     if skipped_m1 or skipped_m2:
         skip_note = (
-            f"\nℹ️ Hali javob kaliti tekshirilmagan savollar — Module 1: "
-            f"{fmt_wrong(skipped_m1)}; Module 2: {fmt_wrong(skipped_m2)} "
-            f"(bular hisobga olinmadi, ball {graded_total} ta savol asosida taxmin qilindi)."
+            f"\n⬜ = hali javob kaliti kiritilmagan (hisobga olinmagan)\n"
         )
 
     result_text = (
         f"📊 <b>Mock {mock_number} — natija</b>\n\n"
-        f"Module 1: {m1_correct}/{QUESTIONS_PER_MODULE - len(skipped_m1)} to'g'ri\n"
-        f"Module 2: {m2_correct}/{QUESTIONS_PER_MODULE - len(skipped_m2)} to'g'ri\n"
-        f"Jami (raw score): {raw_score}/{graded_total}\n\n"
-        f"🎯 <b>Taxminiy Math bali: {scaled}/800</b>\n"
-        f"<i>(bu College Board rasmiy jadvali emas, taxminiy baho — real natija ±10-20 ball farq qilishi mumkin)</i>\n\n"
-        f"❌ Xato savollar (Module 1): {fmt_wrong(wrong_m1)}\n"
-        f"❌ Xato savollar (Module 2): {fmt_wrong(wrong_m2)}"
+        f"<b>Module 1: {m1_correct}/{QUESTIONS_PER_MODULE - len(skipped_m1)} to'g'ri</b>\n"
+        f"{checklist(QUESTIONS_PER_MODULE, set(wrong_m1), set(skipped_m1))}\n\n"
+        f"<b>Module 2: {m2_correct}/{QUESTIONS_PER_MODULE - len(skipped_m2)} to'g'ri</b>\n"
+        f"{checklist(QUESTIONS_PER_MODULE, set(wrong_m2), set(skipped_m2))}\n\n"
+        f"🎯 <b>Math bali: {scaled}/800</b> <i>(taxminiy)</i>"
         f"{skip_note}"
     )
     await state.clear()
