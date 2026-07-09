@@ -374,10 +374,12 @@ async def main():
     font_ok = any(_os.path.exists(p) for p in report.FONT_CANDIDATES_BOLD)
     logo_ok = _os.path.exists(report.LOGO_PATH)
     log.info("Self-check: bold font found = %s, Bilimnur logo found = %s", font_ok, logo_ok)
+    log.info("Self-check details:\n%s", report.debug_paths())
     if not font_ok:
-        log.warning("DIQQAT: fonts/ papkasi topilmadi yoki bo'sh — GitHub'ga fonts/ papkasini yuklaganingizni tekshiring!")
+        log.warning("DIQQAT: shrift fayllari topilmadi — DejaVuSans-Bold.ttf va DejaVuSans.ttf "
+                    "repo ROOT papkasida (fonts/ ichida emas) borligini tekshiring!")
     if not logo_ok:
-        log.warning("DIQQAT: assets/bilimnur_logo.png topilmadi — GitHub'ga assets/ papkasini yuklaganingizni tekshiring!")
+        log.warning("DIQQAT: bilimnur_logo.png topilmadi — repo ROOT papkasida borligini tekshiring!")
     await dp.start_polling(bot)
 
 

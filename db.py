@@ -6,9 +6,9 @@ Foydalanuvchilar va ularning yuborgan natijalarini saqlaydi.
 import sqlite3
 import datetime
 import json
-from contextlib import contextmanager
+import os
 
-DB_PATH = "satbot.db"
+DB_PATH = os.environ.get("DB_PATH", "satbot.db")
 
 
 def get_conn():
