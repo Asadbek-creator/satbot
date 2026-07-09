@@ -28,10 +28,12 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    BufferedInputFile,
 )
 
 import db
 import scoring
+import report
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("satbot")
@@ -279,6 +281,17 @@ async def process_m2(message: Message, state: FSMContext):
     )
     await state.clear()
     await message.answer(result_text, parse_mode="HTML", reply_markup=main_menu_kb())
+
+    if report.has_domain_data(mock_number):
+        try:
+            stats = report.compute_domain_stats(mock_number, m1_answers, m2_answers,
+                                                 key_m1, key_m2, scoring)
+            user = db.get_user(message.from_user.id)
+            buf = report.render_report(user["full_name"], mock_number, scaled, stats)
+            photo = BufferedInputFile(buf.getvalue(), filename=f"mock{mock_number}_report.png")
+            await message.answer_photo(photo, caption="📄 Sizning batafsil natija sertifikatingiz")
+        except Exception as e:
+            log.warning("Report image yaratishda xato: %s", e)
 
     user = db.get_user(message.from_user.id)
     await notify_admins(
