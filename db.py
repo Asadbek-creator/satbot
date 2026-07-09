@@ -120,6 +120,24 @@ def get_all_submissions():
     return rows
 
 
+def get_scores_for_mock(mock_number, exclude_tg_id=None):
+    conn = get_conn()
+    cur = conn.cursor()
+    if exclude_tg_id is not None:
+        cur.execute(
+            "SELECT scaled_score FROM submissions WHERE mock_number=? AND scaled_score IS NOT NULL AND tg_id != ?",
+            (mock_number, exclude_tg_id),
+        )
+    else:
+        cur.execute(
+            "SELECT scaled_score FROM submissions WHERE mock_number=? AND scaled_score IS NOT NULL",
+            (mock_number,),
+        )
+    scores = [r["scaled_score"] for r in cur.fetchall()]
+    conn.close()
+    return scores
+
+
 def get_user_submissions(tg_id):
     conn = get_conn()
     cur = conn.cursor()

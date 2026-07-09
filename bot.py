@@ -287,7 +287,9 @@ async def process_m2(message: Message, state: FSMContext):
             stats = report.compute_domain_stats(mock_number, m1_answers, m2_answers,
                                                  key_m1, key_m2, scoring)
             user = db.get_user(message.from_user.id)
-            buf = report.render_report(user["full_name"], mock_number, scaled, stats)
+            other_scores = db.get_scores_for_mock(mock_number, exclude_tg_id=message.from_user.id)
+            buf = report.render_report(user["full_name"], mock_number, scaled, stats,
+                                        other_scores=other_scores)
             photo = BufferedInputFile(buf.getvalue(), filename=f"mock{mock_number}_report.png")
             await message.answer_photo(photo, caption="📄 Sizning batafsil natija sertifikatingiz")
         except Exception as e:
@@ -367,6 +369,15 @@ async def whoami(message: Message):
 # ---------------------------------------------------------------- Ishga tushirish
 async def main():
     db.init_db()
+    # O'z-o'zini tekshirish: fonts/logo to'g'ri yuklanganini Railway logida ko'rsatadi
+    import os as _os
+    font_ok = any(_os.path.exists(p) for p in report.FONT_CANDIDATES_BOLD)
+    logo_ok = _os.path.exists(report.LOGO_PATH)
+    log.info("Self-check: bold font found = %s, Bilimnur logo found = %s", font_ok, logo_ok)
+    if not font_ok:
+        log.warning("DIQQAT: fonts/ papkasi topilmadi yoki bo'sh — GitHub'ga fonts/ papkasini yuklaganingizni tekshiring!")
+    if not logo_ok:
+        log.warning("DIQQAT: assets/bilimnur_logo.png topilmadi — GitHub'ga assets/ papkasini yuklaganingizni tekshiring!")
     await dp.start_polling(bot)
 
 
