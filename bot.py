@@ -28,8 +28,9 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-    BufferedInputFile,
+    BufferedInputFile, WebAppInfo,
 )
+from aiohttp import web
 
 import db
 import scoring
@@ -44,6 +45,9 @@ ADMIN_IDS = set(
 )
 TOTAL_MOCKS = int(os.environ.get("TOTAL_MOCKS", "1"))
 QUESTIONS_PER_MODULE = 22
+CHANNEL_USERNAME = os.environ.get("CHANNEL_USERNAME", "@Bilimnur_edu")
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")  # masalan https://satbot-production.up.railway.app
+PORT = int(os.environ.get("PORT", "8080"))
 
 with open(os.path.join(os.path.dirname(__file__), "answer_keys.json"), encoding="utf-8") as f:
     ANSWER_KEYS = json.load(f)
@@ -65,14 +69,11 @@ class Submit(StatesGroup):
 
 # ---------------------------------------------------------------- Yordamchi funksiyalar
 def main_menu_kb():
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📝 Natija yuborish")],
-            [KeyboardButton(text="📊 Mening natijalarim")],
-        ],
-        resize_keyboard=True,
-    )
-    return kb
+    buttons = [[KeyboardButton(text="📝 Natija yuborish")]]
+    if WEBAPP_URL:
+        buttons.append([KeyboardButton(text="🚀 Ilovada topshirish", web_app=WebAppInfo(url=WEBAPP_URL))])
+    buttons.append([KeyboardButton(text="📊 Mening natijalarim"), KeyboardButton(text="👤 Profil")])
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
 def mocks_kb():
@@ -100,6 +101,23 @@ def key_for(mock_number: int, module: str):
     return arr
 
 
+def question_types_for(mock_number: int):
+    """Har bir savol 'mc' (A/B/C/D) yoki 'num' (grid-in) ekanini javob kaliti asosida aniqlaydi.
+    Bu faqat kirish maydonining TURINI aniqlash uchun, to'g'ri javobning o'zi ochilmaydi."""
+    def types(arr):
+        result = []
+        for v in (arr or [None] * QUESTIONS_PER_MODULE):
+            if v is not None and str(v).strip().upper() in ("A", "B", "C", "D"):
+                result.append("mc")
+            else:
+                result.append("mc" if v is None else "num")
+        return result
+    entry = ANSWER_KEYS.get(str(mock_number))
+    if not entry:
+        return None
+    return {"m1": types(entry.get("M1")), "m2": types(entry.get("M2"))}
+
+
 async def notify_admins(text: str):
     for admin_id in ADMIN_IDS:
         try:
@@ -108,9 +126,34 @@ async def notify_admins(text: str):
             log.warning("Admin %s ga xabar yuborilmadi: %s", admin_id, e)
 
 
+def subscribe_kb():
+    channel_url = f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Kanalga o'tish", url=channel_url)],
+        [InlineKeyboardButton(text="✅ A'zo bo'ldim, tekshirish", callback_data="check_sub")],
+    ])
+
+
+async def is_subscribed(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception as e:
+        log.warning("Obunani tekshirishda xato (bot kanalga admin qilib qo'shilganmi?): %s", e)
+        # Xato bo'lsa (masalan bot kanalga qo'shilmagan), foydalanuvchini bloklamaymiz
+        return True
+
+
 # ---------------------------------------------------------------- /start va ro'yxatdan o'tish
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    if not await is_subscribed(message.from_user.id):
+        await message.answer(
+            f"Botdan foydalanish uchun avval {CHANNEL_USERNAME} kanaliga a'zo bo'ling.\n\n"
+            f"A'zo bo'lgach, pastdagi tugmani bosing 👇",
+            reply_markup=subscribe_kb(),
+        )
+        return
     user = db.get_user(message.from_user.id)
     if user:
         await message.answer(
@@ -121,6 +164,27 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.set_state(Reg.waiting_name)
     await message.answer(
         "Assalomu alaykum! SAT Math mock natijalarini yuborish botiga xush kelibsiz.\n\n"
+        "Iltimos, Ism va Familiyangizni yuboring (masalan: <i>Aziz Karimov</i>).",
+        parse_mode="HTML",
+    )
+
+
+@dp.callback_query(F.data == "check_sub")
+async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
+    if not await is_subscribed(callback.from_user.id):
+        await callback.answer("❌ Siz hali kanalga a'zo bo'lmagansiz.", show_alert=True)
+        return
+    await callback.answer("✅ Rahmat! Obuna tasdiqlandi.")
+    await callback.message.delete()
+    user = db.get_user(callback.from_user.id)
+    if user:
+        await callback.message.answer(
+            f"Salom, {user['full_name']}! 👋\nQuyidagilardan birini tanlang:",
+            reply_markup=main_menu_kb(),
+        )
+        return
+    await state.set_state(Reg.waiting_name)
+    await callback.message.answer(
         "Iltimos, Ism va Familiyangizni yuboring (masalan: <i>Aziz Karimov</i>).",
         parse_mode="HTML",
     )
@@ -188,33 +252,23 @@ async def process_m1(message: Message, state: FSMContext):
     )
 
 
-@dp.message(Submit.waiting_m2)
-async def process_m2(message: Message, state: FSMContext):
-    answers, err = scoring.parse_answer_list(message.text, QUESTIONS_PER_MODULE)
-    if err:
-        await message.answer(err)
-        return
-    data = await state.get_data()
-    mock_number = data["mock_number"]
-    m1_answers = data["m1_answers"]
-    m2_answers = answers
-
+async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
+                            m1_answers: list, m2_answers: list):
+    """Javoblarni baholab, natija matni + sertifikat rasmini yuboradi.
+    Ham oddiy chat-javob oqimidan, ham Mini App'dan chaqiriladi."""
     key_m1 = key_for(mock_number, "M1")
     key_m2 = key_for(mock_number, "M2")
 
     if key_m1 is None or key_m2 is None:
-        await state.clear()
         await message.answer(
             f"⚠️ Kechirasiz, Mock {mock_number} uchun javob kaliti hali botga kiritilmagan.\n"
             f"Javoblaringiz qabul qilindi va saqlandi, lekin ball hisoblanmadi — admin javob "
             f"kalitini kiritgach, sizga natija yuboriladi.",
             reply_markup=main_menu_kb(),
         )
-        db.save_submission(message.from_user.id, mock_number, m1_answers, m2_answers,
+        db.save_submission(tg_id, mock_number, m1_answers, m2_answers,
                             None, None, None, None, [], [])
-        await notify_admins(
-            f"📩 Yangi javob (KALIT YO'Q): mock {mock_number}, foydalanuvchi {message.from_user.id}"
-        )
+        await notify_admins(f"📩 Yangi javob (KALIT YO'Q): mock {mock_number}, foydalanuvchi {tg_id}")
         return
 
     def grade(user_answers, key):
@@ -234,19 +288,16 @@ async def process_m2(message: Message, state: FSMContext):
     m2_correct, wrong_m2, skipped_m2 = grade(m2_answers, key_m2)
     graded_total = (QUESTIONS_PER_MODULE - len(skipped_m1)) + (QUESTIONS_PER_MODULE - len(skipped_m2))
     raw_score = m1_correct + m2_correct
-    # Agar ba'zi savollar hali "kalit yo'q" bo'lib o'tkazib yuborilgan bo'lsa,
-    # 44 ta savolga nisbatan proporsional taxmin qilamiz.
     projected_raw = round(raw_score * 44 / graded_total) if graded_total else 0
     scaled = scoring.raw_to_scaled(projected_raw)
 
-    db.save_submission(message.from_user.id, mock_number, m1_answers, m2_answers,
+    db.save_submission(tg_id, mock_number, m1_answers, m2_answers,
                         m1_correct, m2_correct, raw_score, scaled, wrong_m1, wrong_m2)
 
     def fmt_wrong(lst):
         return ", ".join(str(x) for x in lst) if lst else "yo'q 🎉"
 
     def checklist(n_questions, wrong_set, skipped_set):
-        """Har bir savol uchun ✅/❌ (yoki kalit yo'q bo'lsa ⬜) ro'yxati."""
         lines = []
         row = []
         for i in range(1, n_questions + 1):
@@ -266,9 +317,7 @@ async def process_m2(message: Message, state: FSMContext):
 
     skip_note = ""
     if skipped_m1 or skipped_m2:
-        skip_note = (
-            f"\n⬜ = hali javob kaliti kiritilmagan (hisobga olinmagan)\n"
-        )
+        skip_note = "\n⬜ = hali javob kaliti kiritilmagan (hisobga olinmagan)\n"
 
     result_text = (
         f"📊 <b>Mock {mock_number} — natija</b>\n\n"
@@ -279,15 +328,14 @@ async def process_m2(message: Message, state: FSMContext):
         f"🎯 <b>Math bali: {scaled}/800</b> <i>(taxminiy)</i>"
         f"{skip_note}"
     )
-    await state.clear()
     await message.answer(result_text, parse_mode="HTML", reply_markup=main_menu_kb())
 
     if report.has_domain_data(mock_number):
         try:
             stats = report.compute_domain_stats(mock_number, m1_answers, m2_answers,
                                                  key_m1, key_m2, scoring)
-            user = db.get_user(message.from_user.id)
-            other_scores = db.get_scores_for_mock(mock_number, exclude_tg_id=message.from_user.id)
+            user = db.get_user(tg_id)
+            other_scores = db.get_scores_for_mock(mock_number, exclude_tg_id=tg_id)
             buf = report.render_report(user["full_name"], mock_number, scaled, stats,
                                         other_scores=other_scores)
             photo = BufferedInputFile(buf.getvalue(), filename=f"mock{mock_number}_report.png")
@@ -295,11 +343,47 @@ async def process_m2(message: Message, state: FSMContext):
         except Exception as e:
             log.warning("Report image yaratishda xato: %s", e)
 
-    user = db.get_user(message.from_user.id)
+    user = db.get_user(tg_id)
     await notify_admins(
         f"📩 {user['full_name']} — Mock {mock_number}: {raw_score}/{graded_total} (≈{scaled}/800)\n"
         f"Xato M1: {fmt_wrong(wrong_m1)} | Xato M2: {fmt_wrong(wrong_m2)}"
     )
+
+
+@dp.message(Submit.waiting_m2)
+async def process_m2(message: Message, state: FSMContext):
+    answers, err = scoring.parse_answer_list(message.text, QUESTIONS_PER_MODULE)
+    if err:
+        await message.answer(err)
+        return
+    data = await state.get_data()
+    mock_number = data["mock_number"]
+    m1_answers = data["m1_answers"]
+    m2_answers = answers
+    await state.clear()
+    await grade_and_respond(message, message.from_user.id, mock_number, m1_answers, m2_answers)
+
+
+@dp.message(F.web_app_data)
+async def process_webapp_data(message: Message, state: FSMContext):
+    """Mini App'dan 'Testni yakunlash' bosilganda kelgan ma'lumotni qabul qiladi."""
+    try:
+        payload = json.loads(message.web_app_data.data)
+        mock_number = int(payload["mock_number"])
+        m1_answers = payload["m1_answers"]
+        m2_answers = payload["m2_answers"]
+        if len(m1_answers) != QUESTIONS_PER_MODULE or len(m2_answers) != QUESTIONS_PER_MODULE:
+            raise ValueError("javoblar soni noto'g'ri")
+    except Exception as e:
+        log.warning("Mini App ma'lumotini o'qishda xato: %s", e)
+        await message.answer("⚠️ Ilovadan kelgan ma'lumotni o'qib bo'lmadi. Qaytadan urinib ko'ring.")
+        return
+    user = db.get_user(message.from_user.id)
+    if not user:
+        await message.answer("Avval /start bosib ro'yxatdan o'ting.")
+        return
+    await state.clear()
+    await grade_and_respond(message, message.from_user.id, mock_number, m1_answers, m2_answers)
 
 
 # ---------------------------------------------------------------- Foydalanuvchi o'z natijalarini ko'rishi
@@ -315,6 +399,31 @@ async def my_results(message: Message):
             lines.append(f"Mock {s['mock_number']}: kalit kutilmoqda ⏳")
         else:
             lines.append(f"Mock {s['mock_number']}: {s['raw_score']}/44 (≈{s['scaled_score']}/800)")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message(F.text == "👤 Profil")
+async def my_profile(message: Message):
+    user = db.get_user(message.from_user.id)
+    if not user:
+        await message.answer("Avval /start bosib ro'yxatdan o'ting.")
+        return
+    subs = db.get_user_submissions(message.from_user.id)
+    graded = [s for s in subs if s["scaled_score"] is not None]
+    reg_date = user["registered_at"][:10] if user.get("registered_at") else "—"
+    lines = [
+        "👤 <b>Profil</b>\n",
+        f"Ism: <b>{user['full_name']}</b>",
+        f"Username: @{user['username']}" if user.get("username") else "Username: —",
+        f"Ro'yxatdan o'tgan sana: {reg_date}",
+        f"Telegram ID: <code>{user['tg_id']}</code>\n",
+        f"Jami yuborilgan natijalar: <b>{len(subs)}</b>",
+    ]
+    if graded:
+        best = max(graded, key=lambda s: s["scaled_score"])
+        avg = round(sum(s["scaled_score"] for s in graded) / len(graded))
+        lines.append(f"Eng yaxshi ball: <b>{best['scaled_score']}/800</b> (Mock {best['mock_number']})")
+        lines.append(f"O'rtacha ball: <b>{avg}/800</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -366,6 +475,39 @@ async def whoami(message: Message):
     await message.answer(f"Sizning Telegram ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
 
 
+# ---------------------------------------------------------------- Mini App uchun veb-server
+WEBAPP_DIR = os.path.join(os.path.dirname(__file__), "webapp")
+
+
+async def webapp_index(request):
+    path = os.path.join(WEBAPP_DIR, "index.html")
+    if not os.path.exists(path):
+        return web.Response(text="webapp/index.html topilmadi", status=500)
+    with open(path, encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace("{{TOTAL_MOCKS}}", str(TOTAL_MOCKS))
+    return web.Response(text=html, content_type="text/html")
+
+
+async def webapp_mock_types(request):
+    mock_number = int(request.match_info["mock_number"])
+    types = question_types_for(mock_number)
+    if types is None:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response(types)
+
+
+async def start_webserver():
+    app = web.Application()
+    app.router.add_get("/", webapp_index)
+    app.router.add_get("/api/mock/{mock_number}", webapp_mock_types)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    log.info("Mini App veb-server ishga tushdi: port %s", PORT)
+
+
 # ---------------------------------------------------------------- Ishga tushirish
 async def main():
     db.init_db()
@@ -380,6 +522,9 @@ async def main():
                     "repo ROOT papkasida (fonts/ ichida emas) borligini tekshiring!")
     if not logo_ok:
         log.warning("DIQQAT: bilimnur_logo.png topilmadi — repo ROOT papkasida borligini tekshiring!")
+    if not WEBAPP_URL:
+        log.warning("DIQQAT: WEBAPP_URL o'rnatilmagan — Mini App tugmasi menyuda ko'rinmaydi!")
+    await start_webserver()
     await dp.start_polling(bot)
 
 
