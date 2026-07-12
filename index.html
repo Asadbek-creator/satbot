@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SAT Mock — Javoblarni yuborish</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --green: #228B4C;
+    --dark-green: #155730;
+    --gold: #E8AC27;
+    --bg: #F4FAF6;
+    --card-border: #D6E8DB;
+    --text: #212529;
+    --gray: #6C757D;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 90px;
+  }
+  header {
+    background: var(--dark-green);
+    color: white;
+    padding: 18px 16px;
+    text-align: center;
+  }
+  header h1 { margin: 0; font-size: 19px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+
+  #mockPicker {
+    padding: 20px 16px;
+    text-align: center;
+  }
+  #mockPicker p { color: var(--gray); font-size: 14px; }
+  #mockSelect {
+    font-size: 17px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    margin: 10px 0 18px;
+    width: 100%;
+    max-width: 260px;
+  }
+  .btn-primary {
+    background: var(--green);
+    color: white;
+    border: none;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 13px 20px;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 320px;
+    cursor: pointer;
+  }
+  .btn-primary:active { opacity: 0.85; }
+
+  #formArea { display: none; padding: 14px; }
+  .module-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--dark-green);
+    margin: 18px 4px 8px;
+    border-bottom: 2px solid var(--card-border);
+    padding-bottom: 6px;
+  }
+  .qcard {
+    background: white;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .qcard .qlabel {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .choices { display: flex; gap: 8px; flex-wrap: wrap; }
+  .choice-btn {
+    flex: 1;
+    min-width: 52px;
+    padding: 10px 0;
+    text-align: center;
+    border: 2px solid var(--card-border);
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    background: white;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+  }
+  .choice-btn.selected {
+    background: var(--green);
+    border-color: var(--green);
+    color: white;
+  }
+  .numinput {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 15px;
+    border: 2px solid var(--card-border);
+    border-radius: 10px;
+  }
+  .numinput:focus, .numinput.selected {
+    border-color: var(--green);
+    outline: none;
+  }
+
+  #progressWrap {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: white;
+    border-top: 1px solid var(--card-border);
+    padding: 10px 16px 14px;
+  }
+  #progressBarBg {
+    background: var(--card-border);
+    border-radius: 8px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  #progressBarFill {
+    background: var(--green);
+    height: 100%;
+    width: 0%;
+    transition: width .2s;
+  }
+  #progressText { font-size: 12px; color: var(--gray); margin-bottom: 8px; text-align: center; }
+  #finishBtn { background: var(--gold); }
+  #finishBtn:disabled { background: var(--card-border); color: var(--gray); }
+
+  #loadingMsg, #errorMsg { text-align: center; padding: 30px 16px; color: var(--gray); }
+  #errorMsg { color: #C0392B; display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📝 SAT Math Mock</h1>
+  <p>Javoblaringizni belgilang</p>
+</header>
+
+<div id="mockPicker">
+  <p>Nechinchi mock uchun javob yubormoqchisiz?</p>
+  <select id="mockSelect"></select><br>
+  <button class="btn-primary" onclick="loadMock()">Boshlash</button>
+  <div id="loadingMsg" style="display:none;">Yuklanmoqda...</div>
+  <div id="errorMsg"></div>
+</div>
+
+<div id="formArea"></div>
+
+<div id="progressWrap" style="display:none;">
+  <div id="progressText">0 / 44 ta savolga javob berildi</div>
+  <div id="progressBarBg"><div id="progressBarFill"></div></div>
+  <button class="btn-primary" id="finishBtn" onclick="finishTest()">✅ Testni yakunlash</button>
+</div>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.expand(); tg.ready(); }
+
+const TOTAL_MOCKS = {{TOTAL_MOCKS}};
+let currentMock = null;
+let qTypes = null; // {m1: ["mc"/"num", ...22], m2: [...]}
+const answers = { m1: Array(22).fill(""), m2: Array(22).fill("") };
+
+const mockSelect = document.getElementById('mockSelect');
+for (let i = 1; i <= TOTAL_MOCKS; i++) {
+  const opt = document.createElement('option');
+  opt.value = i; opt.textContent = "Mock " + i;
+  mockSelect.appendChild(opt);
+}
+
+async function loadMock() {
+  currentMock = parseInt(mockSelect.value, 10);
+  document.getElementById('loadingMsg').style.display = 'block';
+  document.getElementById('errorMsg').style.display = 'none';
+  try {
+    const res = await fetch('/api/mock/' + currentMock);
+    if (!res.ok) throw new Error('not found');
+    qTypes = await res.json();
+    renderForm();
+  } catch (e) {
+    document.getElementById('errorMsg').textContent = "Bu mock uchun ma'lumot topilmadi.";
+    document.getElementById('errorMsg').style.display = 'block';
+  } finally {
+    document.getElementById('loadingMsg').style.display = 'none';
+  }
+}
+
+function renderForm() {
+  document.getElementById('mockPicker').style.display = 'none';
+  const formArea = document.getElementById('formArea');
+  formArea.innerHTML = '';
+  formArea.style.display = 'block';
+  document.getElementById('progressWrap').style.display = 'block';
+
+  ['m1', 'm2'].forEach((mod) => {
+    const title = document.createElement('div');
+    title.className = 'module-title';
+    title.textContent = mod === 'm1' ? 'Math — Module 1' : 'Math — Module 2';
+    formArea.appendChild(title);
+
+    qTypes[mod].forEach((type, idx) => {
+      const card = document.createElement('div');
+      card.className = 'qcard';
+      const label = document.createElement('div');
+      label.className = 'qlabel';
+      label.textContent = 'Savol ' + (idx + 1);
+      card.appendChild(label);
+
+      if (type === 'mc') {
+        const choices = document.createElement('div');
+        choices.className = 'choices';
+        ['A', 'B', 'C', 'D'].forEach((letter) => {
+          const btn = document.createElement('div');
+          btn.className = 'choice-btn';
+          btn.textContent = letter;
+          btn.onclick = () => {
+            choices.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            answers[mod][idx] = letter;
+            updateProgress();
+          };
+          choices.appendChild(btn);
+        });
+        card.appendChild(choices);
+      } else {
+        const input = document.createElement('input');
+        input.className = 'numinput';
+        input.type = 'text';
+        input.inputMode = 'decimal';
+        input.placeholder = 'Javobni kiriting (masalan 18.5 yoki 7/2)';
+        input.oninput = () => {
+          answers[mod][idx] = input.value.trim();
+          input.classList.toggle('selected', input.value.trim() !== '');
+          updateProgress();
+        };
+        card.appendChild(input);
+      }
+      formArea.appendChild(card);
+    });
+  });
+  updateProgress();
+}
+
+function updateProgress() {
+  const filled = answers.m1.filter(a => a !== "").length + answers.m2.filter(a => a !== "").length;
+  const pct = Math.round((filled / 44) * 100);
+  document.getElementById('progressBarFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = filled + ' / 44 ta savolga javob berildi';
+}
+
+function finishTest() {
+  const payload = {
+    mock_number: currentMock,
+    m1_answers: answers.m1,
+    m2_answers: answers.m2,
+  };
+  if (tg && tg.sendData) {
+    tg.sendData(JSON.stringify(payload));
+    tg.close();
+  } else {
+    alert("Bu sahifa faqat Telegram ilovasi ichida ishlaydi.");
+  }
+}
+</script>
+</body>
+</html>
