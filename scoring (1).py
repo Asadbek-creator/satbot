@@ -7,12 +7,6 @@ rasmiy raw->scaled jadval yo'q (har bir test formasi uchun "equating" orqali
 picha farq qiladi, testning o'zi ham adaptiv). Quyidagi jadval keng tarqalgan
 taxminiy (approximate) jadval bo'lib, real ball bilan +-10-20 ball farq qilishi
 mumkin. Bu shunchaki mashq/prognoz uchun, RASMIY BALL EMAS.
-
-TUZATISH (bu versiyada): eski jadvalda 0->200 dan 1->310 ga sakrash bor edi
-(110 ball farq bitta savol uchun), shuning uchun juda past raw ballarda ham
-mantiqsiz baland score chiqarardi (masalan 4/44 -> 370). Yangi jadval ochiq
-manbalardagi (Digital SAT raw-to-scaled taxminiy jadvallar) qiymatlarga
-asoslanib, silliq va monoton o'sadigan qilib qayta hisoblandi.
 """
 
 import re
