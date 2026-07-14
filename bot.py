@@ -15,6 +15,7 @@ Ishga tushirish:
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -31,6 +32,7 @@ from aiogram.types import (
     BufferedInputFile, WebAppInfo,
 )
 from aiohttp import web
+from PIL import Image
 
 import db
 import scoring
@@ -112,6 +114,7 @@ def question_types_for(mock_number: int):
             else:
                 result.append("mc" if v is None else "num")
         return result
+
     entry = ANSWER_KEYS.get(str(mock_number))
     if not entry:
         return None
@@ -144,6 +147,59 @@ async def is_subscribed(user_id: int) -> bool:
         return True
 
 
+# ---------------------------------------------------------------- Baholash (umumiy funksiya)
+def grade_submission(mock_number: int, m1_answers: list, m2_answers: list):
+    """
+    Javoblarni javob kaliti bilan solishtirib, to'liq natija lug'atini qaytaradi.
+    Bu funksiya ham Telegram xabar oqimidan, ham Mini App'ning /api/grade
+    endpoint'idan chaqiriladi — mantiq bitta joyda saqlanadi.
+
+    Qaytaradi: dict yoki None (agar javob kaliti hali kiritilmagan bo'lsa)
+    """
+    key_m1 = key_for(mock_number, "M1")
+    key_m2 = key_for(mock_number, "M2")
+    if key_m1 is None or key_m2 is None:
+        return None
+
+    def grade_module(user_answers, key):
+        per_q = []
+        correct_count = 0
+        wrong, skipped = [], []
+        for i, (u, c) in enumerate(zip(user_answers, key)):
+            qnum = i + 1
+            if c is None:
+                skipped.append(qnum)
+                per_q.append({"number": qnum, "status": "skipped",
+                               "user_answer": u, "correct_answer": None})
+                continue
+            is_correct = scoring.answers_match(u, c)
+            if is_correct:
+                correct_count += 1
+                per_q.append({"number": qnum, "status": "correct",
+                               "user_answer": u, "correct_answer": c})
+            else:
+                wrong.append(qnum)
+                per_q.append({"number": qnum, "status": "wrong",
+                               "user_answer": u, "correct_answer": c})
+        return correct_count, wrong, skipped, per_q
+
+    m1_correct, wrong_m1, skipped_m1, per_q_m1 = grade_module(m1_answers, key_m1)
+    m2_correct, wrong_m2, skipped_m2, per_q_m2 = grade_module(m2_answers, key_m2)
+
+    graded_total = (QUESTIONS_PER_MODULE - len(skipped_m1)) + (QUESTIONS_PER_MODULE - len(skipped_m2))
+    raw_score = m1_correct + m2_correct
+    projected_raw = round(raw_score * 44 / graded_total) if graded_total else 0
+    scaled = scoring.raw_to_scaled(projected_raw)
+
+    return {
+        "m1_correct": m1_correct, "wrong_m1": wrong_m1, "skipped_m1": skipped_m1,
+        "m2_correct": m2_correct, "wrong_m2": wrong_m2, "skipped_m2": skipped_m2,
+        "raw_score": raw_score, "graded_total": graded_total,
+        "projected_raw": projected_raw, "scaled_score": scaled,
+        "per_question": {"m1": per_q_m1, "m2": per_q_m2},
+    }
+
+
 # ---------------------------------------------------------------- /start va ro'yxatdan o'tish
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
@@ -154,6 +210,7 @@ async def cmd_start(message: Message, state: FSMContext):
             reply_markup=subscribe_kb(),
         )
         return
+
     user = db.get_user(message.from_user.id)
     if user:
         await message.answer(
@@ -161,6 +218,7 @@ async def cmd_start(message: Message, state: FSMContext):
             reply_markup=main_menu_kb(),
         )
         return
+
     await state.set_state(Reg.waiting_name)
     await message.answer(
         "Assalomu alaykum! SAT Math mock natijalarini yuborish botiga xush kelibsiz.\n\n"
@@ -174,8 +232,10 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
     if not await is_subscribed(callback.from_user.id):
         await callback.answer("❌ Siz hali kanalga a'zo bo'lmagansiz.", show_alert=True)
         return
+
     await callback.answer("✅ Rahmat! Obuna tasdiqlandi.")
     await callback.message.delete()
+
     user = db.get_user(callback.from_user.id)
     if user:
         await callback.message.answer(
@@ -183,6 +243,7 @@ async def check_sub_callback(callback: CallbackQuery, state: FSMContext):
             reply_markup=main_menu_kb(),
         )
         return
+
     await state.set_state(Reg.waiting_name)
     await callback.message.answer(
         "Iltimos, Ism va Familiyangizni yuboring (masalan: <i>Aziz Karimov</i>).",
@@ -196,6 +257,7 @@ async def process_name(message: Message, state: FSMContext):
     if len(full_name.split()) < 2:
         await message.answer("Iltimos, ism VA familiyangizni birga yuboring (masalan: Aziz Karimov).")
         return
+
     db.upsert_user(
         message.from_user.id,
         message.from_user.username,
@@ -253,13 +315,12 @@ async def process_m1(message: Message, state: FSMContext):
 
 
 async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
-                            m1_answers: list, m2_answers: list):
-    """Javoblarni baholab, natija matni + sertifikat rasmini yuboradi.
+                             m1_answers: list, m2_answers: list):
+    """Javoblarni baholab, natija matni + sertifikat rasmi + PDF yuboradi.
     Ham oddiy chat-javob oqimidan, ham Mini App'dan chaqiriladi."""
-    key_m1 = key_for(mock_number, "M1")
-    key_m2 = key_for(mock_number, "M2")
+    result = grade_submission(mock_number, m1_answers, m2_answers)
 
-    if key_m1 is None or key_m2 is None:
+    if result is None:
         await message.answer(
             f"⚠️ Kechirasiz, Mock {mock_number} uchun javob kaliti hali botga kiritilmagan.\n"
             f"Javoblaringiz qabul qilindi va saqlandi, lekin ball hisoblanmadi — admin javob "
@@ -271,25 +332,13 @@ async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
         await notify_admins(f"📩 Yangi javob (KALIT YO'Q): mock {mock_number}, foydalanuvchi {tg_id}")
         return
 
-    def grade(user_answers, key):
-        wrong, skipped = [], []
-        correct = 0
-        for i, (u, c) in enumerate(zip(user_answers, key)):
-            if c is None:
-                skipped.append(i + 1)
-                continue
-            if scoring.answers_match(u, c):
-                correct += 1
-            else:
-                wrong.append(i + 1)
-        return correct, wrong, skipped
-
-    m1_correct, wrong_m1, skipped_m1 = grade(m1_answers, key_m1)
-    m2_correct, wrong_m2, skipped_m2 = grade(m2_answers, key_m2)
-    graded_total = (QUESTIONS_PER_MODULE - len(skipped_m1)) + (QUESTIONS_PER_MODULE - len(skipped_m2))
-    raw_score = m1_correct + m2_correct
-    projected_raw = round(raw_score * 44 / graded_total) if graded_total else 0
-    scaled = scoring.raw_to_scaled(projected_raw)
+    m1_correct = result["m1_correct"]
+    m2_correct = result["m2_correct"]
+    wrong_m1, skipped_m1 = result["wrong_m1"], result["skipped_m1"]
+    wrong_m2, skipped_m2 = result["wrong_m2"], result["skipped_m2"]
+    raw_score = result["raw_score"]
+    graded_total = result["graded_total"]
+    scaled = result["scaled_score"]
 
     db.save_submission(tg_id, mock_number, m1_answers, m2_answers,
                         m1_correct, m2_correct, raw_score, scaled, wrong_m1, wrong_m2)
@@ -332,16 +381,30 @@ async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
 
     if report.has_domain_data(mock_number):
         try:
+            key_m1 = key_for(mock_number, "M1")
+            key_m2 = key_for(mock_number, "M2")
             stats = report.compute_domain_stats(mock_number, m1_answers, m2_answers,
                                                  key_m1, key_m2, scoring)
             user = db.get_user(tg_id)
             other_scores = db.get_scores_for_mock(mock_number, exclude_tg_id=tg_id)
             buf = report.render_report(user["full_name"], mock_number, scaled, stats,
                                         other_scores=other_scores)
-            photo = BufferedInputFile(buf.getvalue(), filename=f"mock{mock_number}_report.png")
+
+            # PNG sertifikatni rasm sifatida yuboramiz
+            buf.seek(0)
+            png_bytes = buf.getvalue()
+            photo = BufferedInputFile(png_bytes, filename=f"mock{mock_number}_report.png")
             await message.answer_photo(photo, caption="📄 Sizning batafsil natija sertifikatingiz")
+
+            # Xuddi shu rasmni PDF hujjat sifatida ham yuboramiz
+            img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            pdf_buf = io.BytesIO()
+            img.save(pdf_buf, format="PDF")
+            pdf_buf.seek(0)
+            pdf_doc = BufferedInputFile(pdf_buf.getvalue(), filename=f"mock{mock_number}_report.pdf")
+            await message.answer_document(pdf_doc, caption="📎 PDF ko'rinishida")
         except Exception as e:
-            log.warning("Report image yaratishda xato: %s", e)
+            log.warning("Report yaratishda xato: %s", e)
 
     user = db.get_user(tg_id)
     await notify_admins(
@@ -366,7 +429,7 @@ async def process_m2(message: Message, state: FSMContext):
 
 @dp.message(F.web_app_data)
 async def process_webapp_data(message: Message, state: FSMContext):
-    """Mini App'dan 'Testni yakunlash' bosilganda kelgan ma'lumotni qabul qiladi."""
+    """Mini App'dan 'Yakunlash va yopish' bosilganda kelgan ma'lumotni qabul qiladi."""
     try:
         payload = json.loads(message.web_app_data.data)
         mock_number = int(payload["mock_number"])
@@ -378,10 +441,12 @@ async def process_webapp_data(message: Message, state: FSMContext):
         log.warning("Mini App ma'lumotini o'qishda xato: %s", e)
         await message.answer("⚠️ Ilovadan kelgan ma'lumotni o'qib bo'lmadi. Qaytadan urinib ko'ring.")
         return
+
     user = db.get_user(message.from_user.id)
     if not user:
         await message.answer("Avval /start bosib ro'yxatdan o'ting.")
         return
+
     await state.clear()
     await grade_and_respond(message, message.from_user.id, mock_number, m1_answers, m2_answers)
 
@@ -480,9 +545,14 @@ WEBAPP_DIR = os.path.join(os.path.dirname(__file__), "webapp")
 
 
 async def webapp_index(request):
-    path = os.path.join(WEBAPP_DIR, "index.html")
-    if not os.path.exists(path):
-        return web.Response(text="webapp/index.html topilmadi", status=500)
+    # Avval webapp/index.html ni, topilmasa repo ROOT'dagi index.html ni sinaymiz
+    candidates = [
+        os.path.join(WEBAPP_DIR, "index.html"),
+        os.path.join(os.path.dirname(__file__), "index.html"),
+    ]
+    path = next((p for p in candidates if os.path.exists(p)), None)
+    if not path:
+        return web.Response(text="index.html topilmadi", status=500)
     with open(path, encoding="utf-8") as f:
         html = f.read()
     html = html.replace("{{TOTAL_MOCKS}}", str(TOTAL_MOCKS))
@@ -497,10 +567,31 @@ async def webapp_mock_types(request):
     return web.json_response(types)
 
 
+async def webapp_grade(request):
+    """Mini App ichida 'Javoblarni yuborish' bosilganda chaqiriladi.
+    Natijani (ball + har bir savol to'g'ri/xato) darhol ilovaning o'ziga qaytaradi,
+    lekin bazaga saqlash va Telegram xabar/PDF yuborish hali sodir bo'lmaydi —
+    bu faqat foydalanuvchi 'Yakunlash va yopish' bosgach, tg.sendData orqali amalga oshadi."""
+    mock_number = int(request.match_info["mock_number"])
+    try:
+        data = await request.json()
+        m1_answers = data["m1_answers"]
+        m2_answers = data["m2_answers"]
+    except Exception:
+        return web.json_response({"error": "invalid payload"}, status=400)
+
+    result = grade_submission(mock_number, m1_answers, m2_answers)
+    if result is None:
+        return web.json_response({"error": "answer key not available"}, status=404)
+
+    return web.json_response(result)
+
+
 async def start_webserver():
     app = web.Application()
     app.router.add_get("/", webapp_index)
     app.router.add_get("/api/mock/{mock_number}", webapp_mock_types)
+    app.router.add_post("/api/grade/{mock_number}", webapp_grade)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
@@ -511,6 +602,7 @@ async def start_webserver():
 # ---------------------------------------------------------------- Ishga tushirish
 async def main():
     db.init_db()
+
     # O'z-o'zini tekshirish: fonts/logo to'g'ri yuklanganini Railway logida ko'rsatadi
     import os as _os
     font_ok = any(_os.path.exists(p) for p in report.FONT_CANDIDATES_BOLD)
@@ -524,6 +616,7 @@ async def main():
         log.warning("DIQQAT: bilimnur_logo.png topilmadi — repo ROOT papkasida borligini tekshiring!")
     if not WEBAPP_URL:
         log.warning("DIQQAT: WEBAPP_URL o'rnatilmagan — Mini App tugmasi menyuda ko'rinmaydi!")
+
     await start_webserver()
     await dp.start_polling(bot)
 
