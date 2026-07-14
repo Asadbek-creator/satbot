@@ -63,32 +63,13 @@ class Reg(StatesGroup):
     waiting_name = State()
 
 
-class Submit(StatesGroup):
-    choosing_mock = State()
-    waiting_m1 = State()
-    waiting_m2 = State()
-
-
 # ---------------------------------------------------------------- Yordamchi funksiyalar
 def main_menu_kb():
-    buttons = [[KeyboardButton(text="📝 Natija yuborish")]]
+    buttons = []
     if WEBAPP_URL:
         buttons.append([KeyboardButton(text="🚀 Ilovada topshirish", web_app=WebAppInfo(url=WEBAPP_URL))])
     buttons.append([KeyboardButton(text="📊 Mening natijalarim"), KeyboardButton(text="👤 Profil")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-def mocks_kb():
-    buttons = []
-    row = []
-    for i in range(1, TOTAL_MOCKS + 1):
-        row.append(InlineKeyboardButton(text=str(i), callback_data=f"mock:{i}"))
-        if len(row) == 5:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def key_for(mock_number: int, module: str):
@@ -171,6 +152,12 @@ def grade_submission(mock_number: int, m1_answers: list, m2_answers: list):
                 skipped.append(qnum)
                 per_q.append({"number": qnum, "status": "skipped",
                                "user_answer": u, "correct_answer": None})
+                continue
+            if not str(u or "").strip():
+                # Foydalanuvchi bu savolga umuman javob bermagan
+                wrong.append(qnum)
+                per_q.append({"number": qnum, "status": "unanswered",
+                               "user_answer": u, "correct_answer": c})
                 continue
             is_correct = scoring.answers_match(u, c)
             if is_correct:
@@ -272,48 +259,6 @@ async def process_name(message: Message, state: FSMContext):
     await notify_admins(f"🆕 Yangi foydalanuvchi ro'yxatdan o'tdi: {full_name} (@{message.from_user.username})")
 
 
-# ---------------------------------------------------------------- Natija yuborish oqimi
-@dp.message(F.text == "📝 Natija yuborish")
-async def start_submit(message: Message, state: FSMContext):
-    user = db.get_user(message.from_user.id)
-    if not user:
-        await message.answer("Avval /start bosib ro'yxatdan o'ting.")
-        return
-    await state.set_state(Submit.choosing_mock)
-    await message.answer("Nechinchi mock uchun javob yubormoqchisiz?", reply_markup=mocks_kb())
-
-
-@dp.callback_query(Submit.choosing_mock, F.data.startswith("mock:"))
-async def choose_mock(callback: CallbackQuery, state: FSMContext):
-    mock_number = int(callback.data.split(":")[1])
-    await state.update_data(mock_number=mock_number)
-    await state.set_state(Submit.waiting_m1)
-    await callback.message.edit_reply_markup()
-    await callback.message.answer(
-        f"✅ Mock {mock_number} tanlandi.\n\n"
-        f"Endi <b>Module 1</b> javoblarini yuboring — jami {QUESTIONS_PER_MODULE} ta, 1-savoldan boshlab tartib bilan.\n\n"
-        f"Masalan:\n<code>B C A D B C D A B C A D B C A D B C A D B C</code>\n\n"
-        f"Grid-in (variantsiz) savollar uchun raqamni yozing (masalan <code>18.5</code> yoki <code>7/2</code>).",
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@dp.message(Submit.waiting_m1)
-async def process_m1(message: Message, state: FSMContext):
-    answers, err = scoring.parse_answer_list(message.text, QUESTIONS_PER_MODULE)
-    if err:
-        await message.answer(err)
-        return
-    await state.update_data(m1_answers=answers)
-    await state.set_state(Submit.waiting_m2)
-    await message.answer(
-        f"👍 Module 1 qabul qilindi.\n\nEndi <b>Module 2</b> javoblarini xuddi shunday yuboring "
-        f"(jami {QUESTIONS_PER_MODULE} ta).",
-        parse_mode="HTML",
-    )
-
-
 async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
                              m1_answers: list, m2_answers: list):
     """Javoblarni baholab, natija matni + sertifikat rasmi + PDF yuboradi.
@@ -411,20 +356,6 @@ async def grade_and_respond(message: Message, tg_id: int, mock_number: int,
         f"📩 {user['full_name']} — Mock {mock_number}: {raw_score}/{graded_total} (≈{scaled}/800)\n"
         f"Xato M1: {fmt_wrong(wrong_m1)} | Xato M2: {fmt_wrong(wrong_m2)}"
     )
-
-
-@dp.message(Submit.waiting_m2)
-async def process_m2(message: Message, state: FSMContext):
-    answers, err = scoring.parse_answer_list(message.text, QUESTIONS_PER_MODULE)
-    if err:
-        await message.answer(err)
-        return
-    data = await state.get_data()
-    mock_number = data["mock_number"]
-    m1_answers = data["m1_answers"]
-    m2_answers = answers
-    await state.clear()
-    await grade_and_respond(message, message.from_user.id, mock_number, m1_answers, m2_answers)
 
 
 @dp.message(F.web_app_data)
