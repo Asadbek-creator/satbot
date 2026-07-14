@@ -7,13 +7,15 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
-    --green: #228B4C;
-    --dark-green: #155730;
+    --bg: #0E1420;
+    --card: #161D2E;
+    --card-border: #232B40;
+    --blue: #3B82F6;
+    --green: #22C55E;
     --gold: #E8AC27;
-    --bg: #F4FAF6;
-    --card-border: #D6E8DB;
-    --text: #212529;
-    --gray: #6C757D;
+    --red: #EF4444;
+    --text: #F1F5F9;
+    --gray: #8B96AB;
   }
   * { box-sizing: border-box; }
   body {
@@ -24,100 +26,107 @@
     padding-bottom: 90px;
   }
   header {
-    background: var(--dark-green);
-    color: white;
-    padding: 18px 16px;
+    padding: 20px 16px 8px;
     text-align: center;
   }
-  header h1 { margin: 0; font-size: 19px; }
-  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 800; }
+  header p { margin: 4px 0 0; font-size: 13px; color: var(--gray); }
 
-  #mockPicker {
-    padding: 20px 16px;
-    text-align: center;
-  }
+  #mockPicker { padding: 24px 16px; text-align: center; }
   #mockPicker p { color: var(--gray); font-size: 14px; }
   #mockSelect {
     font-size: 17px;
-    padding: 10px 14px;
-    border-radius: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
     border: 1px solid var(--card-border);
+    background: var(--card);
+    color: var(--text);
     margin: 10px 0 18px;
     width: 100%;
     max-width: 260px;
   }
   .btn-primary {
-    background: var(--green);
+    background: linear-gradient(90deg, var(--blue), var(--green));
     color: white;
     border: none;
     font-size: 16px;
-    font-weight: 600;
-    padding: 13px 20px;
-    border-radius: 12px;
+    font-weight: 700;
+    padding: 14px 20px;
+    border-radius: 14px;
     width: 100%;
     max-width: 320px;
     cursor: pointer;
   }
   .btn-primary:active { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.4; }
 
-  #formArea { display: none; padding: 14px; }
+  #formArea, #resultArea { display: none; padding: 14px; }
   .module-title {
-    font-weight: 700;
+    font-weight: 800;
     font-size: 15px;
-    color: var(--dark-green);
-    margin: 18px 4px 8px;
-    border-bottom: 2px solid var(--card-border);
+    color: var(--text);
+    margin: 18px 4px 10px;
     padding-bottom: 6px;
+    border-bottom: 2px solid var(--card-border);
   }
   .qcard {
-    background: white;
+    background: var(--card);
     border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 12px 14px;
+    border-radius: 14px;
+    padding: 14px 16px;
     margin-bottom: 10px;
   }
   .qcard .qlabel {
-    font-weight: 600;
+    font-weight: 700;
     font-size: 14px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     color: var(--text);
+  }
+  .badge-pill {
+    display: inline-block;
+    background: var(--blue);
+    color: white;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    margin-bottom: 14px;
   }
   .choices { display: flex; gap: 8px; flex-wrap: wrap; }
   .choice-btn {
     flex: 1;
     min-width: 52px;
-    padding: 10px 0;
+    padding: 12px 0;
     text-align: center;
     border: 2px solid var(--card-border);
-    border-radius: 10px;
-    font-weight: 700;
+    border-radius: 12px;
+    font-weight: 800;
     font-size: 15px;
-    background: white;
+    background: #1B2438;
     color: var(--text);
     cursor: pointer;
     user-select: none;
   }
   .choice-btn.selected {
-    background: var(--green);
-    border-color: var(--green);
+    background: var(--blue);
+    border-color: var(--blue);
     color: white;
   }
   .numinput {
     width: 100%;
-    padding: 10px 12px;
+    padding: 12px;
     font-size: 15px;
     border: 2px solid var(--card-border);
-    border-radius: 10px;
+    border-radius: 12px;
+    background: #1B2438;
+    color: var(--text);
   }
-  .numinput:focus, .numinput.selected {
-    border-color: var(--green);
-    outline: none;
-  }
+  .numinput:focus, .numinput.selected { border-color: var(--blue); outline: none; }
 
   #progressWrap {
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    background: white;
+    background: var(--card);
     border-top: 1px solid var(--card-border);
     padding: 10px 16px 14px;
   }
@@ -129,17 +138,45 @@
     margin-bottom: 10px;
   }
   #progressBarFill {
-    background: var(--green);
+    background: linear-gradient(90deg, var(--blue), var(--green));
     height: 100%;
     width: 0%;
     transition: width .2s;
   }
   #progressText { font-size: 12px; color: var(--gray); margin-bottom: 8px; text-align: center; }
-  #finishBtn { background: var(--gold); }
   #finishBtn:disabled { background: var(--card-border); color: var(--gray); }
 
   #loadingMsg, #errorMsg { text-align: center; padding: 30px 16px; color: var(--gray); }
-  #errorMsg { color: #C0392B; display: none; }
+  #errorMsg { color: var(--red); display: none; }
+
+  /* Results screen */
+  .score-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 24px 16px;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  .score-card .big { font-size: 46px; font-weight: 800; }
+  .score-card .sub { color: var(--gray); font-size: 13px; margin-top: 4px; }
+  .review-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .review-row .qnum { font-weight: 700; }
+  .review-row .ans { color: var(--gray); font-size: 13px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .dot.correct { background: var(--green); }
+  .dot.wrong { background: var(--red); }
+  .dot.skipped { background: var(--gray); }
 </style>
 </head>
 <body>
@@ -159,10 +196,12 @@
 
 <div id="formArea"></div>
 
+<div id="resultArea"></div>
+
 <div id="progressWrap" style="display:none;">
   <div id="progressText">0 / 44 ta savolga javob berildi</div>
   <div id="progressBarBg"><div id="progressBarFill"></div></div>
-  <button class="btn-primary" id="finishBtn" onclick="finishTest()">✅ Testni yakunlash</button>
+  <button class="btn-primary" id="finishBtn" onclick="finishTest()">✅ Javoblarni yuborish</button>
 </div>
 
 <script>
@@ -205,6 +244,11 @@ function renderForm() {
   formArea.style.display = 'block';
   document.getElementById('progressWrap').style.display = 'block';
 
+  const pill = document.createElement('div');
+  pill.style.textAlign = 'center';
+  pill.innerHTML = '<span class="badge-pill">Mock: ' + currentMock + '</span>';
+  formArea.appendChild(pill);
+
   ['m1', 'm2'].forEach((mod) => {
     const title = document.createElement('div');
     title.className = 'module-title';
@@ -216,7 +260,7 @@ function renderForm() {
       card.className = 'qcard';
       const label = document.createElement('div');
       label.className = 'qlabel';
-      label.textContent = 'Savol ' + (idx + 1);
+      label.textContent = (idx + 1) + '-savol';
       card.appendChild(label);
 
       if (type === 'mc') {
@@ -261,18 +305,73 @@ function updateProgress() {
   document.getElementById('progressText').textContent = filled + ' / 44 ta savolga javob berildi';
 }
 
-function finishTest() {
-  const payload = {
-    mock_number: currentMock,
-    m1_answers: answers.m1,
-    m2_answers: answers.m2,
-  };
-  if (tg && tg.sendData) {
-    tg.sendData(JSON.stringify(payload));
-    tg.close();
-  } else {
-    alert("Bu sahifa faqat Telegram ilovasi ichida ishlaydi.");
+async function finishTest() {
+  const finishBtn = document.getElementById('finishBtn');
+  finishBtn.disabled = true;
+  finishBtn.textContent = 'Baholanmoqda...';
+  try {
+    const res = await fetch('/api/grade/' + currentMock, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ m1_answers: answers.m1, m2_answers: answers.m2 }),
+    });
+    const result = await res.json();
+    renderResults(result);
+  } catch (e) {
+    finishBtn.disabled = false;
+    finishBtn.textContent = '✅ Javoblarni yuborish';
+    alert("Baholashda xatolik yuz berdi. Qaytadan urinib ko'ring.");
   }
+}
+
+function renderResults(result) {
+  document.getElementById('formArea').style.display = 'none';
+  document.getElementById('progressWrap').style.display = 'none';
+  const area = document.getElementById('resultArea');
+  area.style.display = 'block';
+  area.innerHTML = '';
+
+  const scoreCard = document.createElement('div');
+  scoreCard.className = 'score-card';
+  scoreCard.innerHTML =
+    '<div class="big">' + result.scaled_score + '</div>' +
+    '<div class="sub">/ 800 · Raw: ' + result.raw_score + ' / ' + result.graded_total + '</div>';
+  area.appendChild(scoreCard);
+
+  ['m1', 'm2'].forEach((mod) => {
+    const title = document.createElement('div');
+    title.className = 'module-title';
+    title.textContent = mod === 'm1' ? 'Module 1 — javoblar' : 'Module 2 — javoblar';
+    area.appendChild(title);
+
+    result.per_question[mod].forEach((q) => {
+      const row = document.createElement('div');
+      row.className = 'review-row';
+      let dotClass = q.status === 'correct' ? 'correct' : (q.status === 'wrong' ? 'wrong' : 'skipped');
+      let ansText = q.status === 'skipped'
+        ? "Tekshirilmagan"
+        : ('Sizniki: ' + (q.user_answer || '—') + (q.status === 'wrong' ? ' · To\'g\'risi: ' + q.correct_answer : ''));
+      row.innerHTML =
+        '<div><span class="dot ' + dotClass + '"></span><span class="qnum">' + q.number + '-savol</span></div>' +
+        '<div class="ans">' + ansText + '</div>';
+      area.appendChild(row);
+    });
+  });
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn-primary';
+  closeBtn.style.marginTop = '18px';
+  closeBtn.textContent = '✅ Yakunlash va yopish';
+  closeBtn.onclick = () => {
+    const payload = { mock_number: currentMock, m1_answers: answers.m1, m2_answers: answers.m2 };
+    if (tg && tg.sendData) {
+      tg.sendData(JSON.stringify(payload));
+      tg.close();
+    } else {
+      alert("Bu sahifa faqat Telegram ilovasi ichida ishlaydi.");
+    }
+  };
+  area.appendChild(closeBtn);
 }
 </script>
 </body>
