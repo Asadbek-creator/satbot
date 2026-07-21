@@ -13,25 +13,29 @@ TUZATISH (bu versiyada): eski jadvalda 0->200 dan 1->310 ga sakrash bor edi
 mantiqsiz baland score chiqarardi (masalan 4/44 -> 370). Yangi jadval ochiq
 manbalardagi (Digital SAT raw-to-scaled taxminiy jadvallar) qiymatlarga
 asoslanib, silliq va monoton o'sadigan qilib qayta hisoblandi.
+
+TUZATISH 2: real Digital SAT bo'lim balllari doim 10ga karrali bo'ladi
+(200, 210, 220, ... 800 - hech qachon 585 yoki 407 kabi oxiri nol bo'lmagan
+son chiqmaydi). Jadvaldagi barcha qiymatlar eng yaqin o'nlikka yaxlitlandi
+(tartib hali ham monoton o'sib boradi, hech qanday qiymat qaytadan tushmaydi).
 """
 
 import re
 
 # Taxminiy Math bo'limi uchun raw (0-44) -> scaled (200-800) jadval.
+# Barcha qiymatlar 10ga karrali (real Digital SAT bali shunday bo'ladi).
 RAW_TO_SCALED_MATH = {
-    44: 800, 43: 790, 42: 780, 41: 770, 40: 750, 39: 740, 38: 720, 37: 710,
-    36: 700, 35: 680, 34: 670, 33: 650, 32: 640, 31: 620, 30: 600, 29: 585,
-    28: 570, 27: 555, 26: 540, 25: 525, 24: 510, 23: 495, 22: 480, 21: 465,
-    20: 450, 19: 435, 18: 420, 17: 407, 16: 393, 15: 380, 14: 368, 13: 356,
-    12: 344, 11: 332, 10: 320, 9: 308, 8: 296, 7: 284, 6: 272, 5: 260,
-    4: 248, 3: 236, 2: 224, 1: 212, 0: 200,
+44: 800, 43: 790, 42: 780, 41: 770, 40: 750, 39: 740, 38: 720, 37: 710,
+36: 700, 35: 680, 34: 670, 33: 650, 32: 640, 31: 620, 30: 600, 29: 580,
+28: 570, 27: 560, 26: 540, 25: 520, 24: 510, 23: 500, 22: 480, 21: 460,
+20: 450, 19: 440, 18: 420, 17: 410, 16: 390, 15: 380, 14: 370, 13: 360,
+12: 340, 11: 330, 10: 320, 9: 310, 8: 300, 7: 280, 6: 270, 5: 260,
+4: 250, 3: 240, 2: 220, 1: 210, 0: 200,
 }
-
 
 def raw_to_scaled(raw_score: int) -> int:
     raw_score = max(0, min(44, raw_score))
     return RAW_TO_SCALED_MATH[raw_score]
-
 
 def _normalize(ans: str) -> str:
     """Javobni solishtirish uchun normalizatsiya qiladi."""
@@ -43,7 +47,6 @@ def _normalize(ans: str) -> str:
     a = a.rstrip(".")
     return a
 
-
 def _to_float(s: str):
     """Agar mumkin bo'lsa, javobni songa (fraction ham) aylantiradi."""
     s = s.replace("−", "-")
@@ -54,7 +57,6 @@ def _to_float(s: str):
         return float(s)
     except (ValueError, ZeroDivisionError):
         return None
-
 
 def answers_match(user_ans: str, correct_ans: str) -> bool:
     """
@@ -83,14 +85,13 @@ def answers_match(user_ans: str, correct_ans: str) -> bool:
 
     return False
 
-
 def parse_answer_list(text: str, expected_count: int):
     """
     Foydalanuvchi yuborgan xabarni javoblar ro'yxatiga aylantiradi.
     Qo'llab-quvvatlanadigan formatlar:
-      "A B C D ..."           (probel bilan)
-      "A,B,C,D,..."           (vergul bilan)
-      "1-A 2-B 3-C ..."       (raqam-javob)
+      "A B C D ..." (probel bilan)
+      "A,B,C,D,..." (vergul bilan)
+      "1-A 2-B 3-C ..." (raqam-javob)
       har birini alohida qatorda
 
     Qaytaradi: (answers_list, error_message_or_None)
